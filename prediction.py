@@ -19,7 +19,7 @@ def initialize_data(Mstat, Ostat, Tstat):
 
 	new_Mstat = Mstat.drop(['Rk', 'Arena'], axis = 1)
 	new_Ostat = Ostat.drop(['Rk', 'G', 'MP'], axis = 1)
-	new_Tstat = Tstat.drop(['RK', 'G', 'MP'], axis = 1)
+	new_Tstat = Tstat.drop(['Rk', 'G', 'MP'], axis = 1)
 
 	team_stats1 = pd.merge(new_Mstat, new_Ostat, how='left', on='Team')
 	team_stats1 = pd.merge(team_stats1, new_Tstat, how='left', on='Team')
@@ -61,8 +61,8 @@ def build_dataSet(all_data):
 	skip = 0
 	for index, row in all_data.iterrows():
 
-		Wteam = row['Wteam']
-		Lteam = row['Lteam']
+		Wteam = row['WTeam']
+		Lteam = row['LTeam']
 
 		team1_elo = get_elo(Wteam)
 		team2_elo = get_elo(Lteam)
@@ -84,7 +84,7 @@ def build_dataSet(all_data):
 			team2_features.append(value)
 
 		if random.random() > 0.5:
-			x.append(team1_features + team2_features)
+			X.append(team1_features + team2_features)
 			y.append(0)
 		else:
 			X.append(team2_features + team1_features)
@@ -99,3 +99,62 @@ def build_dataSet(all_data):
 		team_elos[Lteam] = new_loser_rank
 
 	return np.nan_to_num(X), y
+
+def predict_winner(team_1, team_2, model):
+	features = []
+
+	# team1, visitor
+	features.append(get_elo(team_1))
+	for key, value in team_stats.loc[team_1].iteritems():
+		features.append(value)
+
+	# team 2 host
+	features.append(get_elo(team_2) + 100)
+	for key, value in team_stats.loc[team_2].iteritems():
+		features.append(value)
+
+	features = np.nan_to_num(features)
+	return model.predict_proba([features])
+
+if __name__ == '__main__':
+
+	Mstat = pd.read_csv(folder + '/15-16Miscellaneous_Stat.csv')
+	Ostat = pd.read_csv(folder + '/15-16Opponent_Per_Game_Stat.csv')
+	Tstat = pd.read_csv(folder + '/15-16Team_Per_Game_Stat.csv')
+
+	team_stats = initialize_data(Mstat, Ostat, Tstat)
+
+	result_data = pd.read_csv(folder + '/2015-2016_result.csv')
+
+	X, y = build_dataSet(result_data)
+
+	print("Fitting on %d game samples.." % len(X))
+
+	model = linear_model.LogisticRegression()
+	model.fit(X, y)
+
+	print("Doing cross-validation..")
+	print(cross_val_score(model, X, y, cv = 10, scoring='accuracy', n_jobs = -1).mean())
+
+	# predict 16-17 by model
+	print('Predicting on new schedule..')
+	schedule1617 = pd.read_csv(folder + '/16-17Schedule.csv')
+	result = []
+	for index, row in schedule1617.iterrows():
+		team1 = row['Vteam']
+		team2 = row['Hteam']
+		pred = predict_winner(team1, team2, model)
+		prob = pred[0][0]
+
+		if prob > 0.5:
+			winner = team1
+			loser = team2 
+			result.append([winner, loser, prob])
+		else:
+			winner = team2
+			loser = team1 
+			result.append([winner, loser, 1- prob])
+	with open('16-17Result.csv', 'wb') as f:
+		writer = csv.writer(f)
+		writer.writerow(['win', 'lose', 'probability'])
+		writer.writerows(result)
